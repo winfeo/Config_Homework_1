@@ -2,6 +2,7 @@ import sys
 import os
 import tarfile
 import csv
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import tkinter as tk
@@ -148,45 +149,106 @@ class ShellEmulator:
         if not from_start_script:
             self.prompt()
 
+    def load_vfs(self):
+        with tarfile.open(self.vfs_path, 'r') as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    file_content = tar.extractfile(member).read().decode('utf-8')
+                    # Сохраняем информацию о файле: содержимое, размер и время последнего изменения
+                    self.vfs[member.name] = {
+                        'content': file_content,
+                        'size': len(file_content),
+                        'mtime': member.mtime
+                    }
+                else:
+                    # Для папок сохраняем только базовую информацию
+                    self.vfs[member.name] = {
+                        'content': None,  # Папка
+                        'size': 4096,  # Размер метаданных папки
+                        'mtime': member.mtime
+                    }
+
     def ls(self, args):
         path = self.cwd
         if path in self.vfs:
-            if self.vfs[path] is None:  # Directory
+            if self.vfs[path]['content'] is None:  # Directory
                 files = [f.replace(path + '/', '') for f in self.vfs.keys() if
                          f.startswith(path + '/') and f.count('/') == 1]
+
                 if "-R" in args:
                     self.ls_recursive(path, files)
-                else:
-                    if "-a" in args:
-                        # Выводим все файлы, включая скрытые
-                        files = [f.replace(path + '/', '') for f in self.vfs.keys() if f.startswith(path + '/')]
-                    if "-l" in args:
-                        # Выводим подробную информацию о файлах
-                        files_info = []
-                        for file in files:
-                            full_path = path + '/' + file
-                            file_info = f"{full_path} - Size: {len(self.vfs[full_path])} bytes" if self.vfs[
-                                full_path] else f"{full_path} - Directory"
-                            files_info.append(file_info)
-                        files = files_info
-                    if "-F" in args:
-                        # Добавляем символы, характеризующие тип
-                        files = [f + '/' if self.vfs[path + '/' + f] is None else f for f in files]
+                    return
 
-                    self.output_text.config(state='normal')
-                    self.output_text.insert(tk.END, "\n".join(files) + "\n")
-                    self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
-                    self.output_text.config(state='disabled')
+                # Проверяем флаги
+                long_format = "-l" in args
+                human_readable = "-h" in args
+
+                if "-a" in args:
+                    files = [f.replace(path + '/', '') for f in self.vfs.keys() if f.startswith(path + '/')]
+
+                output_lines = []
+
+                for file in files:
+                    full_path = path + '/' + file
+                    file_info = self.vfs[full_path]
+
+                    if long_format or human_readable:
+                        # Определяем тип: 'd' для директории, '-' для файла
+                        type_flag = 'd' if file_info['content'] is None else '-'
+                        permissions = "rw-rw-r--"
+                        owner = "user"
+                        group = "user"
+
+                        # Подсчитываем размер
+                        size = self.get_size_recursive(full_path) if type_flag == 'd' else file_info['size']
+
+                        # Преобразуем размер в человеко-читаемый формат, если задан флаг -h
+                        size = self.human_readable_size(size) if human_readable else str(size)
+
+                        # Если флаг -l включен, выводим все данные, включая дату и права
+                        if long_format:
+                            last_modified = time.strftime('%b %d %H:%M', time.localtime(file_info['mtime']))
+                            output_lines.append(
+                                f"{type_flag}{permissions} 1 {owner} {group} {size} {last_modified} {file}")
+                        else:
+                            output_lines.append(f"{file} {size}")
+                    else:
+                        # Если ни -l, ни -h не указаны, выводим только имена файлов
+                        output_lines.append(file)
+
+                self.output_text.config(state='normal')
+                self.output_text.insert(tk.END, "\n".join(output_lines) + "\n")
+                self.output_text.see(tk.END)
+                self.output_text.config(state='disabled')
             else:
                 self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, self.vfs[path] + "\n")
-                self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
+                self.output_text.insert(tk.END, self.vfs[path]['content'] + "\n")
+                self.output_text.see(tk.END)
                 self.output_text.config(state='disabled')
         else:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, "Directory not found\n")
-            self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
+            self.output_text.see(tk.END)
             self.output_text.config(state='disabled')
+
+    def human_readable_size(self, size):
+        # Функция для преобразования размера в человеко-читаемый формат
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024:
+                return f"{size}{unit}"
+            size //= 1024
+        return f"{size}PB"
+
+    def get_size_recursive(self, path):
+        # Функция для рекурсивного подсчета размера папки
+        total_size = 0
+        for name, info in self.vfs.items():
+            if name.startswith(path + '/'):
+                if info['content'] is None:  # Папка
+                    total_size += 4096  # Размер папки
+                else:
+                    total_size += info['size']  # Размер файла
+        return total_size
 
     def ls_recursive(self, path, files):
         self.output_text.config(state='normal')
