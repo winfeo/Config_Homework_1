@@ -29,53 +29,6 @@ class ShellEmulator:
         else:
             print(f"File not found: {file_path}")
 
-    def run_start_script(self):
-        try:
-            # Получаем абсолютный путь к файлу start_script.sh
-            script_path = os.path.abspath(self.start_script)
-            if not os.path.exists(script_path):
-                raise FileNotFoundError(f"File not found: {script_path}")
-
-            # Путь к bash.exe в Git Bash
-            git_bash_path = r"C:\Program Files\Git\bin\bash.exe"
-
-            result = subprocess.run([git_bash_path, script_path], capture_output=True, text=True, encoding='utf-8')
-            self.output_text.config(state='normal')
-            self.output_text.insert(tk.END, result.stdout)
-            self.output_text.config(state='disabled')
-            self.log_action(f"Executed start script: {script_path}")
-        except Exception as e:
-            self.output_text.config(state='normal')
-            self.output_text.insert(tk.END, f"Error executing start script: {e}\n")
-            self.output_text.config(state='disabled')
-            self.log_action(f"Error executing start script: {e}")
-
-        # Добавляем постоянное приглашение после выполнения стартового скрипта
-        self.prompt()
-
-    def initUI(self):
-        self.root.title('Shell Emulator')
-        self.root.geometry('800x600')
-
-        # Создаем текстовое поле для вывода команд и результатов
-        self.output_text = Text(self.root, state='disabled', wrap='none', bg='black', fg='white', insertbackground='white')
-        self.output_text.pack(fill=tk.BOTH, expand=True)
-
-        # Добавляем полосу прокрутки для вывода
-        self.output_scrollbar = Scrollbar(self.root, command=self.output_text.yview)
-        self.output_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.output_text.config(yscrollcommand=self.output_scrollbar.set)
-
-        # Создаем текстовое поле для ввода команд
-        self.input_text = Text(self.root, height=1, wrap='none', bg='black', fg='white', insertbackground='white')
-        self.input_text.pack(fill=tk.X)
-
-        # Привязываем событие нажатия клавиши Enter
-        self.input_text.bind('<Return>', self.execute_command)
-
-        # Добавляем постоянное приглашение
-        self.prompt()
-
     def load_config(self):
         with open('config.csv', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
@@ -107,18 +60,66 @@ class ShellEmulator:
         tree = ET.ElementTree(root)
         tree.write(self.log_file, encoding='utf-8', xml_declaration=True)
 
-    def execute_command(self, event=None):
-        # Получаем текст команды
-        command = self.input_text.get("1.0", tk.END).strip()
-        self.input_text.delete("1.0", tk.END)
+    def initUI(self):
+        self.root.title('Shell Emulator')
+        self.root.geometry('800x600')
 
-        self.output_text.config(state='normal')
-        self.output_text.insert(tk.END, f"{command}\n")
-        self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
-        self.output_text.config(state='disabled')
+        # Создаем текстовое поле для вывода команд и результатов
+        self.output_text = Text(self.root, state='disabled', wrap='none', bg='black', fg='white',
+                                insertbackground='white')
+        self.output_text.pack(fill=tk.BOTH, expand=True)
+
+        # Добавляем полосу прокрутки для вывода
+        self.output_scrollbar = Scrollbar(self.root, command=self.output_text.yview)
+        self.output_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.output_text.config(yscrollcommand=self.output_scrollbar.set)
+
+        # Создаем текстовое поле для ввода команд
+        self.input_text = Text(self.root, height=1, wrap='none', bg='black', fg='white', insertbackground='white')
+        self.input_text.pack(fill=tk.X)
+
+        # Привязываем событие нажатия клавиши Enter
+        self.input_text.bind('<Return>', self.execute_command)
+
+    def run_start_script(self):
+        try:
+            script_path = os.path.abspath(self.start_script)
+            if not os.path.exists(script_path):
+                raise FileNotFoundError(f"File not found: {script_path}")
+
+            with open(script_path, 'r', encoding='utf-8') as file:
+                commands = file.read().strip().split('\n')
+
+            for command in commands:
+                self.output_text.config(state='normal')
+                # Выводим корректное приглашение с "~" для корневой директории
+                prompt_path = "~" if self.cwd == "papka" else self.cwd
+                self.output_text.insert(tk.END, f"user@shell:{prompt_path}$ {command}\n")
+                self.output_text.config(state='disabled')
+
+                self.execute_command(None, command, from_start_script=True)
+
+            self.log_action(f"Executed start script: {script_path}")
+
+            # После выполнения всех команд добавляем одно приглашение для пользователя
+            self.prompt()
+        except Exception as e:
+            self.output_text.config(state='normal')
+            self.output_text.insert(tk.END, f"Error executing start script: {e}\n")
+            self.output_text.config(state='disabled')
+            self.log_action(f"Error executing start script: {e}")
+
+    def execute_command(self, event=None, command=None, from_start_script=False):
+        if command is None:
+            command = self.input_text.get("1.0", tk.END).strip()
+            self.input_text.delete("1.0", tk.END)
+
+        if not from_start_script:
+            self.output_text.config(state='normal')
+            self.output_text.insert(tk.END, f"{command}\n")
+            self.output_text.config(state='disabled')
 
         self.log_action(command)
-
         parts = command.split()
         if not parts:
             return
@@ -141,12 +142,11 @@ class ShellEmulator:
         else:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, f"Command not found: {cmd}\n")
-            self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
             self.output_text.config(state='disabled')
 
-        # Добавляем постоянное приглашение после выполнения команды
-        self.prompt()
-        self.output_text.see(tk.END)  # Автоматически прокручиваем вниз после добавления приглашения
+        # Приглашение добавляется только, если команда не из стартового скрипта
+        if not from_start_script:
+            self.prompt()
 
     def ls(self, args):
         path = self.cwd
@@ -277,7 +277,8 @@ class ShellEmulator:
 
     def prompt(self):
         self.output_text.config(state='normal')
-        prompt_path = self.cwd if self.cwd != "papka" else "~"
+        # Проверяем, если cwd равен "papka", то заменяем его на "~"
+        prompt_path = "~" if self.cwd == "papka" else self.cwd
         self.output_text.insert(tk.END, f"user@shell:{prompt_path}$ ")
         self.output_text.config(state='disabled')
 
