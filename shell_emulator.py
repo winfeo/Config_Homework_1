@@ -8,7 +8,6 @@ import tkinter as tk
 from tkinter import Text, Entry, Button, Scrollbar
 import subprocess
 
-#Testing Git
 class ShellEmulator:
     def __init__(self, root):
         self.root = root
