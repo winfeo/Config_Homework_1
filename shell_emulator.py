@@ -317,21 +317,56 @@ class ShellEmulator:
         self.output_text.config(state='disabled')
 
     def mv(self, args):
-        if len(args) == 2:
-            src, dest = args
-            if src in self.vfs:
-                self.vfs[dest] = self.vfs.pop(src)
-                self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, f"Moved {src} to {dest}\n")
-                self.output_text.config(state='disabled')
-            else:
-                self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, "File not found\n")
-                self.output_text.config(state='disabled')
-        else:
+        if len(args) < 2:
             self.output_text.config(state='normal')
-            self.output_text.insert(tk.END, "Usage: mv <source> <destination>\n")
+            self.output_text.insert(tk.END, "mv: missing file operand\n")
             self.output_text.config(state='disabled')
+            self.prompt()  # Обновление приглашения только один раз
+            return
+
+        destination = args[-1]  # Последний аргумент - это назначение
+        sources = args[:-1]  # Все, кроме последнего, это источники
+
+        # Определяем полный путь назначения
+        if destination.startswith("/"):
+            full_destination = destination.strip("/")  # Убираем начальный слеш
+        else:
+            full_destination = "/".join([self.cwd.strip("/"), destination]).strip("/")
+
+        # Проверяем, является ли назначение директорией
+        is_directory = full_destination in self.vfs and self.vfs[full_destination]['content'] is None
+
+        # Перебор источников
+        for source in sources:
+            if source.startswith("/"):
+                full_source = source.strip("/")  # Убираем начальный слеш
+            else:
+                full_source = "/".join([self.cwd.strip("/"), source]).strip("/")
+
+            # Проверяем существование источника
+            if full_source not in self.vfs:
+                self.output_text.config(state='normal')
+                self.output_text.insert(tk.END, f"mv: cannot stat '{source}': No such file or directory\n")
+                self.output_text.config(state='disabled')
+                continue
+
+            # Если целевой путь - директория, перемещаем файл в неё
+            if is_directory:
+                destination_path = f"{full_destination}/{source.split('/')[-1]}"  # Новый путь в директории
+            else:
+                destination_path = full_destination  # Если целевой путь не директория, просто переименуем
+
+            # Обновляем структуру VFS
+            self.vfs[destination_path] = self.vfs[full_source]  # Копируем информацию о файле
+            del self.vfs[full_source]  # Удаляем исходный файл
+
+        # Уведомление о результате перемещения
+        self.output_text.config(state='normal')
+        self.output_text.insert(tk.END, f"Moved {', '.join(sources)} to {destination}\n")
+        self.output_text.config(state='disabled')
+
+        # Вызываем prompt() только один раз в конце
+        #self.prompt()
 
     def find(self, args):
         # Определение допустимых ключей и критериев
