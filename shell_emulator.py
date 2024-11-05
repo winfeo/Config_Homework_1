@@ -58,7 +58,7 @@ class ShellEmulator:
         self.root.geometry('800x600')
 
         # Создаем текстовое поле для вывода команд и результатов
-        self.output_text = Text(self.root, state='disabled', wrap='none')
+        self.output_text = Text(self.root, state='disabled', wrap='none', bg='black', fg='white', insertbackground='white')
         self.output_text.pack(fill=tk.BOTH, expand=True)
 
         # Добавляем полосу прокрутки для вывода
@@ -67,7 +67,7 @@ class ShellEmulator:
         self.output_text.config(yscrollcommand=self.output_scrollbar.set)
 
         # Создаем текстовое поле для ввода команд
-        self.input_text = Text(self.root, height=1, wrap='none')
+        self.input_text = Text(self.root, height=1, wrap='none', bg='black', fg='white', insertbackground='white')
         self.input_text.pack(fill=tk.X)
 
         # Привязываем событие нажатия клавиши Enter
