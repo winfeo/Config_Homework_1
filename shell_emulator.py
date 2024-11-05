@@ -252,6 +252,15 @@ class ShellEmulator:
                 self.ls_recursive(file, sub_files)
 
     def cd(self, args):
+        # Проверяем, если введенные аргументы валидны
+        if len(args) > 1:
+            self.output_text.config(state='normal')
+            self.output_text.insert(tk.END, "cd: too many arguments\n")
+            self.output_text.see(tk.END)  # Прокручиваем текстовый виджет вниз
+            self.output_text.config(state='disabled')
+            self.prompt()  # Обновление приглашения
+            return
+
         # Перемещение на один каталог вверх
         if not args:
             self.cwd = "papka"  # Если нет аргументов, переходим в корневую директорию
@@ -325,6 +334,10 @@ class ShellEmulator:
             self.output_text.config(state='disabled')
 
     def find(self, args):
+        # Определение допустимых ключей и критериев
+        valid_keys = {"-name", "-type", "-size"}
+        valid_types = {"f", "d"}  # Допустимые значения для -type
+
         # Определение каталога для поиска
         if args and not args[0].startswith("-"):
             search_dir = args.pop(0)  # Первое значение в args — это папка поиска
@@ -339,31 +352,45 @@ class ShellEmulator:
         search_type = None  # Тип файла: "f" (файл) или "d" (директория)
         search_size = None  # Критерий размера
 
-        # Обработка аргументов
+        # Обработка аргументов с проверкой на допустимые ключи
         while args:
             param = args.pop(0)
+            if param not in valid_keys:
+                # Если ключ не допустим, выводим сообщение об ошибке
+                self.output_text.config(state='normal')
+                self.output_text.insert(tk.END, f"find: invalid option -- '{param}'\n")
+                self.output_text.insert(tk.END, "Usage: find [directory] [-name pattern] [-type f|d] [-size N[K|M]]\n")
+                self.output_text.config(state='disabled')
+                return  # Прерываем выполнение команды
+
             if param == "-name":
-                search_name = args.pop(0)  # Следующее значение — это имя/шаблон для поиска
-                # Автоматически экранируем символы, если они не в кавычках
-                if "*" in search_name or "?" in search_name:
+                search_name = args.pop(0) if args else None
+                if search_name:
                     search_name = search_name.replace("*", ".*").replace("?", ".")
             elif param == "-type":
-                search_type = args.pop(0)
+                if args and args[0] in valid_types:
+                    search_type = args.pop(0)
+                else:
+                    # Ошибка при неверном значении -type
+                    self.output_text.config(state='normal')
+                    self.output_text.insert(tk.END, "find: invalid type; use 'f' for file or 'd' for directory\n")
+                    self.output_text.config(state='disabled')
+                    return
             elif param == "-size":
-                search_size = args.pop(0)
+                search_size = args.pop(0) if args else None
 
         # Рекурсивная функция для поиска файлов в VFS
         def recursive_search(current_path):
             results = []
-            for item in self.vfs:
+            for item, item_info in self.vfs.items():
+                # Проверяем, начинается ли путь с текущей директории и ищем рекурсивно
                 if item.startswith(current_path):
-                    item_info = self.vfs[item]
                     item_name = item.split("/")[-1]
                     is_match = True  # Флаг совпадения
 
                     # Критерий: имя или расширение
                     if search_name:
-                        name_pattern = f"^{search_name}$"  # Регулярное выражение для полного совпадения
+                        name_pattern = f"^{search_name}$"
                         if not re.fullmatch(name_pattern, item_name):
                             is_match = False
 
@@ -375,7 +402,7 @@ class ShellEmulator:
 
                     # Критерий: размер
                     if search_size:
-                        size_limit = int(search_size[:-1])  # Убираем последний символ для единицы
+                        size_limit = int(search_size[:-1])
                         if search_size[-1].upper() == "M":
                             size_limit *= 1024 * 1024
                         elif search_size[-1].upper() == "K":
