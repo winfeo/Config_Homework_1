@@ -98,12 +98,14 @@ class ShellEmulator:
                 self.output_text.insert(tk.END, f"user@shell:{prompt_path}$ {command}\n")
                 self.output_text.config(state='disabled')
 
+                # Выполняем команду без добавления нового приглашения
                 self.execute_command(None, command, from_start_script=True)
 
             self.log_action(f"Executed start script: {script_path}")
 
             # После выполнения всех команд добавляем одно приглашение для пользователя
-            self.prompt()
+            self.prompt()  # Теперь вызов prompt здесь
+
         except Exception as e:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, f"Error executing start script: {e}\n")
@@ -131,7 +133,7 @@ class ShellEmulator:
         if cmd == "ls":
             self.ls(args)
         elif cmd == "cd":
-            self.cd(args)
+            self.cd(args)  # cd уже вызывает prompt внутри
         elif cmd == "echo":
             self.echo(args)
         elif cmd == "mv":
@@ -145,8 +147,8 @@ class ShellEmulator:
             self.output_text.insert(tk.END, f"Command not found: {cmd}\n")
             self.output_text.config(state='disabled')
 
-        # Приглашение добавляется только, если команда не из стартового скрипта
-        if not from_start_script:
+        # Добавляем prompt только для интерактивных команд
+        if not from_start_script and cmd != "cd":
             self.prompt()
 
     def load_vfs(self):
@@ -154,76 +156,62 @@ class ShellEmulator:
             for member in tar.getmembers():
                 if member.isfile():
                     file_content = tar.extractfile(member).read().decode('utf-8')
-                    # Сохраняем информацию о файле: содержимое, размер и время последнего изменения
                     self.vfs[member.name] = {
                         'content': file_content,
                         'size': len(file_content),
                         'mtime': member.mtime
                     }
                 else:
-                    # Для папок сохраняем только базовую информацию
                     self.vfs[member.name] = {
                         'content': None,  # Папка
                         'size': 4096,  # Размер метаданных папки
                         'mtime': member.mtime
                     }
+            # Отладочный вывод
+            print("Loaded VFS structure:")
+            for key, value in self.vfs.items():
+                print(f"{key}: {value}")
 
     def ls(self, args):
         path = self.cwd
         if path in self.vfs:
-            if self.vfs[path]['content'] is None:  # Directory
-                files = [f.replace(path + '/', '') for f in self.vfs.keys() if
-                         f.startswith(path + '/') and f.count('/') == 1]
+            if self.vfs[path]['content'] is None:  # Это директория
+                files = [f for f in self.vfs.keys() if f.startswith(path + '/') and f.count('/') == path.count('/') + 1]
 
-                if "-R" in args:
-                    self.ls_recursive(path, files)
-                    return
-
-                # Проверяем флаги
                 long_format = "-l" in args
                 human_readable = "-h" in args
-
-                if "-a" in args:
-                    files = [f.replace(path + '/', '') for f in self.vfs.keys() if f.startswith(path + '/')]
 
                 output_lines = []
 
                 for file in files:
-                    full_path = path + '/' + file
+                    full_path = file
                     file_info = self.vfs[full_path]
 
-                    if long_format or human_readable:
-                        # Определяем тип: 'd' для директории, '-' для файла
+                    size = file_info['size']
+
+                    # Преобразуем размер в человеко-читаемый формат, если задан флаг -h
+                    size_display = self.human_readable_size(size) if human_readable else str(size)
+
+                    if long_format:
                         type_flag = 'd' if file_info['content'] is None else '-'
-                        permissions = "rw-rw-r--"
+                        permissions = "rw-rw-r--"  # Убедитесь, что у вас есть способ установить права доступа
                         owner = "user"
                         group = "user"
+                        last_modified = time.strftime('%b %d %H:%M', time.localtime(file_info['mtime']))
 
-                        # Подсчитываем размер
-                        size = self.get_size_recursive(full_path) if type_flag == 'd' else file_info['size']
-
-                        # Преобразуем размер в человеко-читаемый формат, если задан флаг -h
-                        size = self.human_readable_size(size) if human_readable else str(size)
-
-                        # Если флаг -l включен, выводим все данные, включая дату и права
-                        if long_format:
-                            last_modified = time.strftime('%b %d %H:%M', time.localtime(file_info['mtime']))
-                            output_lines.append(
-                                f"{type_flag}{permissions} 1 {owner} {group} {size} {last_modified} {file}")
-                        else:
-                            output_lines.append(f"{file} {size}")
+                        output_lines.append(
+                            f"{type_flag}{permissions} 1 {owner} {group} {size_display} {last_modified} {file.split('/')[-1]}")
                     else:
-                        # Если ни -l, ни -h не указаны, выводим только имена файлов
-                        output_lines.append(file)
+                        output_lines.append(file.split('/')[-1])
 
                 self.output_text.config(state='normal')
                 self.output_text.insert(tk.END, "\n".join(output_lines) + "\n")
                 self.output_text.see(tk.END)
                 self.output_text.config(state='disabled')
             else:
+                # Этот блок будет выполняться, если текущий путь не является директорией
                 self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, self.vfs[path]['content'] + "\n")
-                self.output_text.see(tk.END)
+                self.output_text.insert(tk.END, f"{path} is not a directory\n")
                 self.output_text.config(state='disabled')
         else:
             self.output_text.config(state='normal')
@@ -232,22 +220,20 @@ class ShellEmulator:
             self.output_text.config(state='disabled')
 
     def human_readable_size(self, size):
-        # Функция для преобразования размера в человеко-читаемый формат
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size < 1024:
-                return f"{size}{unit}"
-            size //= 1024
-        return f"{size}PB"
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 ** 2:
+            return f"{size / 1024:.1f} KB"
+        elif size < 1024 ** 3:
+            return f"{size / (1024 ** 2):.1f} MB"
+        else:
+            return f"{size / (1024 ** 3):.1f} GB"
 
     def get_size_recursive(self, path):
-        # Функция для рекурсивного подсчета размера папки
         total_size = 0
-        for name, info in self.vfs.items():
-            if name.startswith(path + '/'):
-                if info['content'] is None:  # Папка
-                    total_size += 4096  # Размер папки
-                else:
-                    total_size += info['size']  # Размер файла
+        for item in self.vfs.keys():
+            if item.startswith(path + '/') and item != path:  # Убедитесь, что это не сам путь
+                total_size += self.vfs[item]['size']
         return total_size
 
     def ls_recursive(self, path, files):
@@ -263,44 +249,28 @@ class ShellEmulator:
 
     def cd(self, args):
         if not args:
-            # Если нет аргументов, переходим в корневую директорию
-            self.cwd = "papka"
+            self.cwd = "papka"  # Если нет аргументов, переходим в корневую директорию
         else:
-            path = args[0]  # Получаем путь из аргумента
+            path = args[0]
 
-            # Если путь абсолютный
+            # Проверка, является ли путь абсолютным
             if path.startswith("/"):
-                new_dir = ["papka"]  # Абсолютный путь, начинаем с "papka"
-                path = path[1:]  # Убираем слэш в начале
+                full_vfs_path = path.strip("/")
             else:
-                # Относительный путь от текущей директории
-                new_dir = self.cwd.strip("/").split("/") if self.cwd != "papka" else []
+                # Относительный путь
+                full_vfs_path = "/".join([self.cwd.strip("/"), path]).strip("/")
 
-            # Разбиваем путь на части
-            parts = path.split("/")
+        # Проверяем, существует ли целевой путь в VFS и является ли он директорией
+        if full_vfs_path in self.vfs and self.vfs[full_vfs_path]['content'] is None:
+            self.cwd = full_vfs_path  # Обновляем текущую директорию
+        else:
+            self.output_text.config(state='normal')
+            self.output_text.insert(tk.END, f"cd: no such file or directory: {path}\n")
+            self.output_text.see(tk.END)
+            self.output_text.config(state='disabled')
+            return  # Выход из метода после ошибки
 
-            for part in parts:
-                if part == "..":
-                    # Переход на уровень выше
-                    if len(new_dir) > 0:  # Не выходим за пределы корня
-                        new_dir.pop()
-                elif part == "." or part == "":  # Игнорируем текущий каталог (".") и пустые сегменты
-                    continue
-                else:
-                    new_dir.append(part)  # Добавляем папку в новый путь
-
-            # Собираем полный путь
-            full_path = "/" + "/".join(new_dir).strip("/")
-
-            # Проверяем, что конечный путь существует в виртуальной файловой системе
-            if full_path in self.vfs and self.vfs[full_path] is None:  # Это каталог
-                self.cwd = full_path  # Обновляем текущую директорию
-            else:
-                # Если путь не существует, выводим ошибку
-                self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, f"cd: no such file or directory: {path}\n")
-                self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
-                self.output_text.config(state='disabled')
+        self.prompt()  # Обновление приглашения
 
     def echo(self, args):
         self.output_text.config(state='normal')
@@ -340,7 +310,7 @@ class ShellEmulator:
     def prompt(self):
         self.output_text.config(state='normal')
         # Проверяем, если cwd равен "papka", то заменяем его на "~"
-        prompt_path = "~" if self.cwd == "papka" else self.cwd
+        prompt_path = "~" if self.cwd == "papka" else self.cwd.replace("papka/", "~/")
         self.output_text.insert(tk.END, f"user@shell:{prompt_path}$ ")
         self.output_text.config(state='disabled')
 
