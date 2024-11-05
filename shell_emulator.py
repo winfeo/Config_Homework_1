@@ -149,23 +149,43 @@ class ShellEmulator:
         self.output_text.see(tk.END)  # Автоматически прокручиваем вниз после добавления приглашения
 
     def ls(self, args):
-        path = self.cwd if not args else os.path.join(self.cwd, args[0])
+        path = self.cwd
         if path in self.vfs:
             if self.vfs[path] is None:  # Directory
-                files = [f for f in self.vfs.keys() if f.startswith(path) and f != path]
+                files = [f.replace(path + '/', '') for f in self.vfs.keys() if
+                         f.startswith(path + '/') and f.count('/') == 1]
                 if "-R" in args:
                     self.ls_recursive(path, files)
                 else:
+                    if "-a" in args:
+                        # Выводим все файлы, включая скрытые
+                        files = [f.replace(path + '/', '') for f in self.vfs.keys() if f.startswith(path + '/')]
+                    if "-l" in args:
+                        # Выводим подробную информацию о файлах
+                        files_info = []
+                        for file in files:
+                            full_path = path + '/' + file
+                            file_info = f"{full_path} - Size: {len(self.vfs[full_path])} bytes" if self.vfs[
+                                full_path] else f"{full_path} - Directory"
+                            files_info.append(file_info)
+                        files = files_info
+                    if "-F" in args:
+                        # Добавляем символы, характеризующие тип
+                        files = [f + '/' if self.vfs[path + '/' + f] is None else f for f in files]
+
                     self.output_text.config(state='normal')
                     self.output_text.insert(tk.END, "\n".join(files) + "\n")
+                    self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
                     self.output_text.config(state='disabled')
             else:
                 self.output_text.config(state='normal')
                 self.output_text.insert(tk.END, self.vfs[path] + "\n")
+                self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
                 self.output_text.config(state='disabled')
         else:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, "Directory not found\n")
+            self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
             self.output_text.config(state='disabled')
 
     def ls_recursive(self, path, files):
@@ -181,19 +201,43 @@ class ShellEmulator:
 
     def cd(self, args):
         if not args:
+            # Если нет аргументов, переходим в корневую директорию
             self.cwd = "papka"
         else:
-            new_path = os.path.join(self.cwd, args[0])
-            if new_path == "..":
-                # Переход в родительский каталог
-                self.cwd = os.path.dirname(self.cwd)
-                if self.cwd == "":
-                    self.cwd = "papka"
-            elif new_path in self.vfs and self.vfs[new_path] is None:
-                self.cwd = new_path
+            path = args[0]  # Получаем путь из аргумента
+
+            # Если путь абсолютный
+            if path.startswith("/"):
+                new_dir = ["papka"]  # Абсолютный путь, начинаем с "papka"
+                path = path[1:]  # Убираем слэш в начале
             else:
+                # Относительный путь от текущей директории
+                new_dir = self.cwd.strip("/").split("/") if self.cwd != "papka" else []
+
+            # Разбиваем путь на части
+            parts = path.split("/")
+
+            for part in parts:
+                if part == "..":
+                    # Переход на уровень выше
+                    if len(new_dir) > 0:  # Не выходим за пределы корня
+                        new_dir.pop()
+                elif part == "." or part == "":  # Игнорируем текущий каталог (".") и пустые сегменты
+                    continue
+                else:
+                    new_dir.append(part)  # Добавляем папку в новый путь
+
+            # Собираем полный путь
+            full_path = "/" + "/".join(new_dir).strip("/")
+
+            # Проверяем, что конечный путь существует в виртуальной файловой системе
+            if full_path in self.vfs and self.vfs[full_path] is None:  # Это каталог
+                self.cwd = full_path  # Обновляем текущую директорию
+            else:
+                # Если путь не существует, выводим ошибку
                 self.output_text.config(state='normal')
-                self.output_text.insert(tk.END, "Directory not found\n")
+                self.output_text.insert(tk.END, f"cd: no such file or directory: {path}\n")
+                self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
                 self.output_text.config(state='disabled')
 
     def echo(self, args):
