@@ -114,6 +114,7 @@ class ShellEmulator:
 
         self.output_text.config(state='normal')
         self.output_text.insert(tk.END, f"{command}\n")
+        self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
         self.output_text.config(state='disabled')
 
         self.log_action(command)
@@ -140,10 +141,12 @@ class ShellEmulator:
         else:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, f"Command not found: {cmd}\n")
+            self.output_text.see(tk.END)  # Автоматически прокручиваем вниз
             self.output_text.config(state='disabled')
 
         # Добавляем постоянное приглашение после выполнения команды
         self.prompt()
+        self.output_text.see(tk.END)  # Автоматически прокручиваем вниз после добавления приглашения
 
     def ls(self, args):
         path = self.cwd if not args else os.path.join(self.cwd, args[0])
