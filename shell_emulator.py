@@ -134,6 +134,7 @@ class ShellEmulator:
             self.ls(args)
         elif cmd == "cd":
             self.cd(args)  # cd уже вызывает prompt внутри
+            self.output_text.see(tk.END)  # Убедитесь, что прокрутка вниз вызывается здес
         elif cmd == "echo":
             self.echo(args)
         elif cmd == "mv":
@@ -149,7 +150,8 @@ class ShellEmulator:
 
         # Добавляем prompt только для интерактивных команд
         if not from_start_script and cmd != "cd":
-            self.prompt()
+            self.prompt()  # Здесь prompt также вызывается
+            self.output_text.see(tk.END)  # Здесь прокрутка тоже будет срабатывать
 
     def load_vfs(self):
         with tarfile.open(self.vfs_path, 'r') as tar:
@@ -248,29 +250,55 @@ class ShellEmulator:
                 self.ls_recursive(file, sub_files)
 
     def cd(self, args):
+        # Перемещение на один каталог вверх
         if not args:
             self.cwd = "papka"  # Если нет аргументов, переходим в корневую директорию
         else:
             path = args[0]
 
-            # Проверка, является ли путь абсолютным
-            if path.startswith("/"):
-                full_vfs_path = path.strip("/")
+            if path == "..":  # Переход на один уровень вверх
+                if self.cwd != "papka":  # Если мы не находимся в корневом каталоге
+                    self.cwd = "/".join(self.cwd.split("/")[:-1]) or "papka"
+            elif path == "-":  # Возвращение в предыдущий каталог
+                if hasattr(self, 'prev_cwd'):
+                    self.cwd, self.prev_cwd = self.prev_cwd, self.cwd
+                else:
+                    self.output_text.config(state='normal')
+                    self.output_text.insert(tk.END, "No previous directory\n")
+                    self.output_text.config(state='disabled')
+                    self.prompt()  # Обновление приглашения
+                    return
+            elif path == "/":  # Переход в корневую директорию
+                self.cwd = "papka"  # Или используйте любую другую строку, обозначающую корневую директорию
             else:
-                # Относительный путь
-                full_vfs_path = "/".join([self.cwd.strip("/"), path]).strip("/")
+                # Нормализация пути
+                components = self.cwd.strip("/").split("/") + path.split("/")
+                normalized_components = []
 
-        # Проверяем, существует ли целевой путь в VFS и является ли он директорией
-        if full_vfs_path in self.vfs and self.vfs[full_vfs_path]['content'] is None:
-            self.cwd = full_vfs_path  # Обновляем текущую директорию
-        else:
-            self.output_text.config(state='normal')
-            self.output_text.insert(tk.END, f"cd: no such file or directory: {path}\n")
-            self.output_text.see(tk.END)
-            self.output_text.config(state='disabled')
-            return  # Выход из метода после ошибки
+                for component in components:
+                    if component == "" or component == ".":  # Пропускаем пустые и текущие директории
+                        continue
+                    elif component == "..":  # Подъем на уровень вверх
+                        if normalized_components:
+                            normalized_components.pop()  # Убираем последний элемент
+                    else:
+                        normalized_components.append(component)  # Добавляем текущую директорию
 
-        self.prompt()  # Обновление приглашения
+                # Сборка нормализованного пути
+                full_vfs_path = "/".join(normalized_components).strip("/")
+
+                # Проверяем, существует ли целевой путь в VFS и является ли он директорией
+                if full_vfs_path in self.vfs and self.vfs[full_vfs_path]['content'] is None:
+                    self.prev_cwd = self.cwd  # Сохраняем предыдущий каталог
+                    self.cwd = full_vfs_path  # Обновляем текущую директорию
+                else:
+                    self.output_text.config(state='normal')
+                    self.output_text.insert(tk.END, f"cd: no such file or directory: {path}\n")
+                    self.output_text.config(state='disabled')
+                    self.prompt()  # Обновление приглашения после ошибки
+                    return
+
+        self.prompt()  # Обновление приглашения после успешного выполнения команды
 
     def echo(self, args):
         self.output_text.config(state='normal')
@@ -313,6 +341,9 @@ class ShellEmulator:
         prompt_path = "~" if self.cwd == "papka" else self.cwd.replace("papka/", "~/")
         self.output_text.insert(tk.END, f"user@shell:{prompt_path}$ ")
         self.output_text.config(state='disabled')
+
+        # Автоматически прокручиваем вниз после добавления приглашения
+        self.output_text.see(tk.END)
 
 
 if __name__ == '__main__':
