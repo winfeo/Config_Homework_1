@@ -3,6 +3,8 @@ import os
 import tarfile
 import csv
 import time
+import re
+import fnmatch
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import tkinter as tk
@@ -323,17 +325,84 @@ class ShellEmulator:
             self.output_text.config(state='disabled')
 
     def find(self, args):
-        if not args:
-            self.output_text.config(state='normal')
-            self.output_text.insert(tk.END, "Usage: find <filename>\n")
-            self.output_text.config(state='disabled')
-            return
+        # Определение каталога для поиска
+        if args and not args[0].startswith("-"):
+            search_dir = args.pop(0)  # Первое значение в args — это папка поиска
+            search_dir = search_dir.strip("/")
+            if search_dir == ".":
+                search_dir = self.cwd.strip("/")
+        else:
+            search_dir = self.cwd  # Если папка не указана, используем текущий каталог
 
-        filename = args[0]
-        found = [f for f in self.vfs.keys() if filename in f]
-        self.output_text.config(state='normal')
-        self.output_text.insert(tk.END, "\n".join(found) if found else "File not found\n")
-        self.output_text.config(state='disabled')
+        # Настройка параметров поиска по умолчанию
+        search_name = None  # Шаблон имени
+        search_type = None  # Тип файла: "f" (файл) или "d" (директория)
+        search_size = None  # Критерий размера
+
+        # Обработка аргументов
+        while args:
+            param = args.pop(0)
+            if param == "-name":
+                search_name = args.pop(0)  # Следующее значение — это имя/шаблон для поиска
+                # Автоматически экранируем символы, если они не в кавычках
+                if "*" in search_name or "?" in search_name:
+                    search_name = search_name.replace("*", ".*").replace("?", ".")
+            elif param == "-type":
+                search_type = args.pop(0)
+            elif param == "-size":
+                search_size = args.pop(0)
+
+        # Рекурсивная функция для поиска файлов в VFS
+        def recursive_search(current_path):
+            results = []
+            for item in self.vfs:
+                if item.startswith(current_path):
+                    item_info = self.vfs[item]
+                    item_name = item.split("/")[-1]
+                    is_match = True  # Флаг совпадения
+
+                    # Критерий: имя или расширение
+                    if search_name:
+                        name_pattern = f"^{search_name}$"  # Регулярное выражение для полного совпадения
+                        if not re.fullmatch(name_pattern, item_name):
+                            is_match = False
+
+                    # Критерий: тип
+                    if search_type == "f" and item_info['content'] is None:
+                        is_match = False
+                    elif search_type == "d" and item_info['content'] is not None:
+                        is_match = False
+
+                    # Критерий: размер
+                    if search_size:
+                        size_limit = int(search_size[:-1])  # Убираем последний символ для единицы
+                        if search_size[-1].upper() == "M":
+                            size_limit *= 1024 * 1024
+                        elif search_size[-1].upper() == "K":
+                            size_limit *= 1024
+
+                        if item_info['size'] > size_limit:
+                            is_match = False
+
+                    # Добавляем элемент, если все критерии совпадают
+                    if is_match:
+                        results.append(item)
+
+            return results
+
+        # Начинаем поиск с указанного каталога
+        results = recursive_search(search_dir)
+
+        # Вывод результатов
+        if results:
+            self.output_text.config(state='normal')
+            for result in results:
+                self.output_text.insert(tk.END, f"{result}\n")
+            self.output_text.config(state='disabled')
+        else:
+            self.output_text.config(state='normal')
+            self.output_text.insert(tk.END, "No matching files found\n")
+            self.output_text.config(state='disabled')
 
     def prompt(self):
         self.output_text.config(state='normal')
