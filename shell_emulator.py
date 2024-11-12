@@ -49,7 +49,7 @@ class ShellEmulator:
                 else:
                     self.vfs[member.name] = None
 
-    def log_action(self, action):
+    def log_action(self, action, result=None):
         try:
             tree = ET.parse(self.log_file)
             root = tree.getroot()
@@ -58,7 +58,9 @@ class ShellEmulator:
 
         entry = ET.SubElement(root, "entry")
         entry.set("timestamp", datetime.now().isoformat())
-        entry.text = action
+        entry.set("command", action)
+        if result is not None:
+            entry.set("result", result)
 
         tree = ET.ElementTree(root)
         tree.write(self.log_file, encoding='utf-8', xml_declaration=True)
@@ -124,7 +126,6 @@ class ShellEmulator:
             self.output_text.insert(tk.END, f"{command}\n")
             self.output_text.config(state='disabled')
 
-        self.log_action(command)
         parts = command.split()
         if not parts:
             return
@@ -132,28 +133,34 @@ class ShellEmulator:
         cmd = parts[0]
         args = parts[1:]
 
+        result = None
+
         if cmd == "ls":
-            self.ls(args)
+            result = self.ls(args)
         elif cmd == "cd":
-            self.cd(args)  # cd уже вызывает prompt внутри
-            self.output_text.see(tk.END)  # Убедитесь, что прокрутка вниз вызывается здес
+            result = self.cd(args)  # cd уже вызывает prompt внутри
+            self.output_text.see(tk.END)  # Убедитесь, что прокрутка вниз вызывается здесь
         elif cmd == "echo":
-            self.echo(args)
+            result = self.echo(args)
         elif cmd == "mv":
-            self.mv(args)
+            result = self.mv(args)
         elif cmd == "find":
-            self.find(args)
+            result = self.find(args)
         elif cmd == "exit":
             self.root.quit()
         else:
             self.output_text.config(state='normal')
             self.output_text.insert(tk.END, f"Command not found: {cmd}\n")
             self.output_text.config(state='disabled')
+            result = f"Command not found: {cmd}"
 
         # Добавляем prompt только для интерактивных команд
         if not from_start_script and cmd != "cd":
             self.prompt()  # Здесь prompt также вызывается
             self.output_text.see(tk.END)  # Здесь прокрутка тоже будет срабатывать
+
+        # Логируем результат команды только один раз после выполнения команды
+        self.log_action(command, result)
 
     def load_vfs(self):
         with tarfile.open(self.vfs_path, 'r') as tar:
